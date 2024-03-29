@@ -10,6 +10,8 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 
 public class Consumer {
@@ -54,6 +56,11 @@ public class Consumer {
       Connection connection = connectionFactory.newConnection();
       ExecutorService multiThreadPool = Executors.newFixedThreadPool(numberOfThread);
 
+
+      // Init Dynamo DB
+      DynamoDBHelper.init();
+      DynamoDBHelper.createLiftRecordTable();
+
       // start channels
       for (int num = 0; num < numberOfThread; num ++) {
         multiThreadPool.execute(new ConsumerThread(connection, rabbitMQName, basicqos));
@@ -61,10 +68,43 @@ public class Consumer {
 
       System.out.println("Successfully Init Servlet");
 
+
+      // last steps
+      ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+      checkNumberOfRecordInDDB(scheduledExecutorService);
+      shutDown(scheduledExecutorService);
+
+
     } catch (Exception e) {
       // if init fail, we will throw new exception
       System.out.println(" Fail to Init Servlet");
       throw new RuntimeException(e);
     }
   }
+
+
+
+  private static void checkNumberOfRecordInDDB(ScheduledExecutorService scheduledExecutorService){
+    scheduledExecutorService.scheduleAtFixedRate(() -> {
+      long successfulWrites = DynamoDBHelper.getSuccessCount();
+      System.out.println("Total Number of Record Saved To DDB " + successfulWrites);
+    }, 0, 1, TimeUnit.SECONDS);
+  }
+
+  private static void shutDown(ScheduledExecutorService scheduledExecutorService){
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      DynamoDBHelper.flush();
+      scheduledExecutorService.shutdown();
+      try {
+        if (!scheduledExecutorService.awaitTermination(60, TimeUnit.SECONDS)) {
+          scheduledExecutorService.shutdownNow();
+        }
+      } catch (InterruptedException e) {
+        scheduledExecutorService.shutdownNow();
+      }
+    }));
+  }
+
+
+
 }

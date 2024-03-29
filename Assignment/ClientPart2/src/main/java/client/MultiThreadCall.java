@@ -21,10 +21,10 @@ public class MultiThreadCall {
   public static void main(String[] args) throws InterruptedException {
 
 //    final String ipAddress = "localhost:8080";
-//    final String ipAddress = "34.208.249.172:8080";
-    final String ipAddress = "Server-LB-1567985433.us-west-2.elb.amazonaws.com";
+    final String ipAddress = "18.246.235.35:8080";
+//    final String ipAddress = "Server-LB-1567985433.us-west-2.elb.amazonaws.com";
     final int numberOfThreadForProcess1 = 32;
-    final int numberOfThreadForProcess2 = 1200;
+    final int numberOfThreadForProcess2 = 400;
     ExecutorService executor = Executors.newFixedThreadPool(numberOfThreadForProcess1 + numberOfThreadForProcess2);
     BlockingQueue<LiftRideRecord> liftRideRecordBlockingQueue = new LinkedBlockingQueue<>();
     final int requestCount = 200000;
