@@ -5,6 +5,8 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import java.io.InputStream;
 import java.io.PrintWriter;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -207,7 +209,7 @@ public class SkierServlet extends HttpServlet {
     // example valid path
     // "/skier/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID}"
 
-    String dayID = "1";
+    List<String> validDays = Arrays.asList("1", "2", "3");
     String seasonID = "2024";
     int resortID_Max = 10;
     int resortID_Min = 1;
@@ -226,7 +228,7 @@ public class SkierServlet extends HttpServlet {
           && isNumeric(urlPath[validUrlPathDaysIDPosition])
           && urlPath[validUrlPathSkiersIDPosition]!= null
           && isNumeric(urlPath[validUrlPathSkiersIDPosition])
-          && urlPath[validUrlPathDaysIDPosition].equals(dayID)
+          && validDays.contains(urlPath[validUrlPathDaysIDPosition])
           && urlPath[validUrlPathSeasonIDPosition].equals(seasonID)
           && Integer.parseInt(urlPath[validUrlPathResortNumberPosition]) >= resortID_Min
           && Integer.parseInt(urlPath[validUrlPathResortNumberPosition]) <= resortID_Max

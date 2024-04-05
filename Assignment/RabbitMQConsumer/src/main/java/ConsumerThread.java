@@ -71,6 +71,10 @@ public class ConsumerThread implements Runnable {
 
           //
           item.put("resortID", AttributeValue.builder().s(liftRideRecord.get("resortID").getAsString()).build());
+          item.put("liftID", AttributeValue.builder().s(liftRideRecord.get("liftID").getAsString()).build());
+          item.put("seasonID", AttributeValue.builder().s(liftRideRecord.get("seasonID").getAsString()).build());
+          item.put("dayID", AttributeValue.builder().s(liftRideRecord.get("dayID").getAsString()).build());
+          item.put("time", AttributeValue.builder().s(liftRideRecord.get("time").getAsString()).build());
           // DynamoDBHelper.insert(item);
           DynamoDBHelper.batchInsert(item);
 

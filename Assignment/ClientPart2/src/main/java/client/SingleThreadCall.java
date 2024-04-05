@@ -16,7 +16,7 @@ public class SingleThreadCall {
 
 //    final String ipAddress = "localhost:8080";
 //    final String ipAddress = "Server-LB-1567985433.us-west-2.elb.amazonaws.com";
-    final String ipAddress = "18.246.235.35:8080";
+    final String ipAddress = "34.221.222.103:8080";
     BlockingQueue<LiftRideRecord> liftRideRecordBlockingQueue = new LinkedBlockingQueue<>();
     final int requestCount = 25;
     AtomicInteger requestSuccessCount = new AtomicInteger(0);

@@ -8,6 +8,11 @@ import java.util.concurrent.CountDownLatch;
 public class LiftRecordProducer implements Runnable {
 
   private BlockingQueue<LiftRideRecord> liftRideRecordBlockingQueue;
+
+  private final String dayID = "3";
+  private final String seasonID = "2024";
+  private final int resortID = 1;
+
   private final CountDownLatch countDownLatch;
   private final Random random = new Random();
   private final int numPosts;
@@ -32,16 +37,12 @@ public class LiftRecordProducer implements Runnable {
   }
 
   private LiftRideRecord validRideGenerator() {
-
-    String dayID = "1";
-    String seasonID = "2024";
     int time_Max = 360;
     int liftID_Max = 40;
-    int resortID_Max = 10;
     int skierID_Max = 100000;
 
     return new LiftRideRecord(random.nextInt(skierID_Max) + 1,
-        random.nextInt(resortID_Max) + 1,
+        resortID,
         random.nextInt(liftID_Max) + 1,
         seasonID,
         dayID,

@@ -21,7 +21,7 @@ public class MultiThreadCall {
   public static void main(String[] args) throws InterruptedException {
 
 //    final String ipAddress = "localhost:8080";
-    final String ipAddress = "18.246.235.35:8080";
+    final String ipAddress = "34.221.222.103:8080";
 //    final String ipAddress = "Server-LB-1567985433.us-west-2.elb.amazonaws.com";
     final int numberOfThreadForProcess1 = 32;
     final int numberOfThreadForProcess2 = 400;
@@ -62,7 +62,7 @@ public class MultiThreadCall {
     executor.awaitTermination(1, TimeUnit.HOURS);
 
     String localPath = "responseData.csv";
-    writeRawData(responseDataList, localPath);
+//    writeRawData(responseDataList, localPath);
 
     calculateStatistic(responseDataList);
 
