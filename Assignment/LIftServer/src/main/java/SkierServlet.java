@@ -1,3 +1,5 @@
+import com.fasterxml.jackson.core.JsonProcessingException;
+import software.amazon.awssdk.regions.Region;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.rabbitmq.client.Channel;
@@ -5,9 +7,7 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import java.io.InputStream;
 import java.io.PrintWriter;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import javax.servlet.ServletException;
@@ -19,8 +19,12 @@ import java.io.IOException;
 import model.LiftRideRecord;
 import model.Message;
 import com.google.gson.Gson;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
-@WebServlet(name = "SkierServlet", value = "/SkierServlet")
+@WebServlet(name = "SkierServlet", urlPatterns = "/skiers/*")
 public class SkierServlet extends HttpServlet {
 
   private Gson gson = new Gson();
@@ -40,11 +44,51 @@ public class SkierServlet extends HttpServlet {
   private final int validUrlPathSkiersPosition = 6;
   private final int validUrlPathSkiersIDPosition = 7;
 
+  private static int SEASON_ID_INDEX = 0;
+  private static int LIFT_ID_INDEX = 1;
+  private static int DAY_ID_INDEX = 2;
+  private static int TIME_ID_INDEX = 3;
+
+
+  public static String tableName = "LiftRideRecordTable";
+
+  public static Region region = Region.US_WEST_2;
+
+  public static DynamoDbClient dynamoDbClient;
+
+  public static String AWS_ACCESS_KEY_ID;
+
+  public static String AWS_SECRET_ACCESS_KEY;
+
 
   @Override
   public void init() throws ServletException {
     // init rabbitmq connection and thread pool
     super.init();
+
+    if (dynamoDbClient == null) {
+      try {
+        // local test
+//        dynamoDbClient = DynamoDbClient.builder()
+//                .endpointOverride(URI.create("http://localhost:8000"))
+//                .region(Region.US_WEST_1)
+//                .credentialsProvider(StaticCredentialsProvider.create(
+//                        AwsBasicCredentials.create(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)))
+//                .build();
+
+        try{
+          dynamoDbClient = DynamoDbClient.builder().region(region).build();
+        } catch ( Exception e) {
+          System.err.println("Fail to init Dynamo DB client" + e.getClass().getName() + ": " + e.getMessage());
+        }
+
+        System.out.println("Successfully initialized DynamoDB client to connect to local instance.");
+      } catch (Exception e) {
+        System.err.println("Failed to initialize DynamoDB client: " + e.getClass().getName() + ": " + e.getMessage());
+      }
+    }
+
+
     try (InputStream inputStream = getClass().getClassLoader().getResourceAsStream("rabbitmq.conf")) {
       if ( inputStream == null) {
         throw new ServletException("Fail to config rabbitMq because unable to read config file");
@@ -89,7 +133,7 @@ public class SkierServlet extends HttpServlet {
       }
       // close connection
       if (connection != null && connection.isOpen()) {
-          connection.close();
+        connection.close();
       }
     } catch (Exception e) {
       e.printStackTrace();
@@ -98,28 +142,132 @@ public class SkierServlet extends HttpServlet {
 
 
   @Override
-  protected void doGet(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
+  protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    String path = request.getPathInfo();
+    if (path.matches("/\\d+$")) {
+      String[] segments = path.split("/");
+      String skierId = segments[1];
 
-    res.setContentType("text/plain");
+      String jsonResponse = getSkierVerticalTotals(skierId);
 
-    String urlPath = req.getPathInfo();
+      response.setContentType("application/json");
+      response.setCharacterEncoding("UTF-8");
+      response.getWriter().write(jsonResponse);
+    } else if (path.matches("/\\d+/seasons/\\d+/days/\\d+/skiers/\\d+$")) {
+      String[] segments = path.split("/");
 
-    // check we have a URL!
-    if (urlPath == null || urlPath.isEmpty()) {
-      res.setStatus(HttpServletResponse.SC_NOT_FOUND);
-      res.getWriter().write("missing parameters");
-      return;
+      String resortId = segments[1];
+      String seasonId = segments[3];
+      String dayId = segments[5];
+      String skierId = segments[7];
+
+      String jsonResponse = getSkierDayVertical(resortId, seasonId, dayId, skierId);
+
+      response.setContentType("application/json");
+      response.setCharacterEncoding("UTF-8");
+      response.getWriter().write(jsonResponse);
     }
+    else {
+      ObjectMapper mapper = new ObjectMapper();
+      ObjectNode jsonResponse = mapper.createObjectNode();
 
-    String[] urlParts = urlPath.split("/");
+      jsonResponse.put("error", "No matching route found");
+      jsonResponse.put("path", path);
 
-    if (!isUrlValid(urlParts)) {
-      res.setStatus(HttpServletResponse.SC_NOT_FOUND);
-    } else {
-      res.setStatus(HttpServletResponse.SC_OK);
-      // do any sophisticated processing with urlParts which contains all the url params
-      // TODO: process url params in `urlParts`
-      res.getWriter().write("It works!");
+      ObjectNode queryParams = mapper.createObjectNode();
+      request.getParameterMap().forEach((key, value) -> {
+        queryParams.put(key, value[0]);
+      });
+      jsonResponse.set("queryParams", queryParams);
+
+      response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+      response.setContentType("application/json");
+      response.setCharacterEncoding("UTF-8");
+      response.getWriter().write(jsonResponse.toString());
+    }
+  }
+
+
+  private static String getSkierDayVertical(String resortId, String seasonId, String dayId, String skierId) {
+    System.out.println("Querying for total ski day vertical for a skier");
+    ObjectMapper mapper = new ObjectMapper();
+    ObjectNode jsonResponse = mapper.createObjectNode();
+    try {
+      ScanRequest scanRequest = ScanRequest.builder()
+              .tableName(tableName)
+              .filterExpression("resortID = :v_resort AND skierID = :v_skier")
+              .expressionAttributeValues(Map.of(
+                      ":v_resort", AttributeValue.builder().s(resortId).build(),
+                      ":v_skier", AttributeValue.builder().s(skierId).build()))
+              .build();
+
+
+      List<Map<String, AttributeValue>> items = dynamoDbClient.scan(scanRequest).items();
+      System.out.println(items.size());
+
+      int totalVertical = 0;
+
+      for (Map<String, AttributeValue> item : items) {
+        String[] parts = item.get("liftInfo").s().split(":");
+        String seasonIdInRecord = parts[SEASON_ID_INDEX];
+        String dayIdInRecord = parts[DAY_ID_INDEX];
+
+        if (seasonIdInRecord.equals(seasonId) && dayIdInRecord.equals(dayId)) {
+          int liftID = Integer.parseInt(parts[LIFT_ID_INDEX]);
+          totalVertical += liftID * 10;
+        }
+      }
+      jsonResponse.put("The total ski day vertical for a skier: ", totalVertical);
+      return mapper.writeValueAsString(jsonResponse);
+    } catch (Exception e) {
+      System.err.println("An error occurred: " + e);
+      jsonResponse.removeAll();
+      jsonResponse.put("error", "An error occurred while processing your request");
+      try {
+        return mapper.writeValueAsString(jsonResponse);
+      } catch (JsonProcessingException jsonProcessingException) {
+        return "{\"error\":\"Failed to process error response\"}";
+      }
+    }
+  }
+
+  private static String getSkierVerticalTotals(String skierId) {
+    // get the total vertical for the skier for specified seasons at the specified resort
+    ObjectMapper mapper = new ObjectMapper();
+    ObjectNode jsonResponse = mapper.createObjectNode();
+    int totalVertical = 0;
+
+    System.out.println("Querying for total vertical for skier " + skierId);
+    try {
+      QueryRequest queryRequest = QueryRequest.builder()
+              .tableName(tableName)
+              .keyConditionExpression("skierID = :v_id")
+              .expressionAttributeValues(Map.of(":v_id", AttributeValue.builder().s(skierId).build()))
+              .build();
+
+      List<Map<String, AttributeValue>> items = dynamoDbClient.query(queryRequest).items();
+
+      for (Map<String, AttributeValue> item : items) {
+        String info = item.get("liftInfo").s();
+        String[] parts = info.split(":");
+        int liftID = Integer.parseInt(parts[LIFT_ID_INDEX]);
+        totalVertical += liftID * 10;
+      }
+
+      String key = "The total vertical for the skier for specified seasons at the specified resort: ";
+      jsonResponse.put(key, totalVertical);
+
+      return mapper.writeValueAsString(jsonResponse);
+
+    } catch (Exception e) {
+      jsonResponse.put("error", "An error occurred querying DynamoDB: " + e.getMessage());
+      try {
+        return mapper.writeValueAsString(jsonResponse);
+      } catch (Exception jsonProcessingException) {
+        System.err.println("An error occurred while generating error response: " + jsonProcessingException.getMessage());
+        jsonProcessingException.printStackTrace();
+        return "{\"error\":\"Failed to process error response\"}";
+      }
     }
   }
 
@@ -129,7 +277,7 @@ public class SkierServlet extends HttpServlet {
 
   @Override
   protected void doPost(HttpServletRequest request, HttpServletResponse response)
-      throws ServletException, IOException {
+          throws ServletException, IOException {
 
     PrintWriter printWriter = response.getWriter();
     response.setContentType("application/json");
@@ -179,12 +327,12 @@ public class SkierServlet extends HttpServlet {
 
         // convert to JsonPrimitive
         JsonObject messageObject = new JsonObject();
-        messageObject.add("skierID", new JsonPrimitive(Integer.parseInt(urlParts[validUrlPathSkiersIDPosition])));
-        messageObject.add("resortID", new JsonPrimitive(Integer.parseInt(urlParts[validUrlPathResortNumberPosition])));
-        messageObject.add("liftID", new JsonPrimitive(liftRideRecord.getLiftID()));
+        messageObject.add("skierID", new JsonPrimitive(String.valueOf(Integer.parseInt(urlParts[validUrlPathSkiersIDPosition]))));
+        messageObject.add("resortID", new JsonPrimitive(String.valueOf(Integer.parseInt(urlParts[validUrlPathResortNumberPosition]))));
+        messageObject.add("liftID", new JsonPrimitive(String.valueOf(liftRideRecord.getLiftID())));
         messageObject.add("seasonID", new JsonPrimitive(urlParts[validUrlPathSeasonIDPosition]));
         messageObject.add("dayID", new JsonPrimitive(urlParts[validUrlPathDaysIDPosition]));
-        messageObject.add("time", new JsonPrimitive(liftRideRecord.getTime()));
+        messageObject.add("time", new JsonPrimitive(String.valueOf(liftRideRecord.getTime())));
 
         channel.basicPublish("", rabbitMQName, null, messageObject.toString().getBytes());
 //        System.out.println(" Successful Sent message with record: " + liftRideRecord);
@@ -218,22 +366,22 @@ public class SkierServlet extends HttpServlet {
 
     if (urlPath.length == validUrlPathLength) {
       return urlPath[validUrlPathSeasonPosition].equals("seasons")
-          && urlPath[validUrlPathDaysPosition].equals("days")
-          && urlPath[validUrlPathSkiersPosition].equals("skiers")
-          && urlPath[validUrlPathResortNumberPosition]!= null
-          && isNumeric(urlPath[validUrlPathResortNumberPosition])
-          && urlPath[validUrlPathSeasonIDPosition]!= null
-          && isNumeric(urlPath[validUrlPathSeasonIDPosition])
-          && urlPath[validUrlPathDaysIDPosition]!= null
-          && isNumeric(urlPath[validUrlPathDaysIDPosition])
-          && urlPath[validUrlPathSkiersIDPosition]!= null
-          && isNumeric(urlPath[validUrlPathSkiersIDPosition])
-          && validDays.contains(urlPath[validUrlPathDaysIDPosition])
-          && urlPath[validUrlPathSeasonIDPosition].equals(seasonID)
-          && Integer.parseInt(urlPath[validUrlPathResortNumberPosition]) >= resortID_Min
-          && Integer.parseInt(urlPath[validUrlPathResortNumberPosition]) <= resortID_Max
-          && Integer.parseInt(urlPath[validUrlPathSkiersIDPosition]) >= skierID_Min
-          && Integer.parseInt(urlPath[validUrlPathSkiersIDPosition]) <= skierID_Max;
+              && urlPath[validUrlPathDaysPosition].equals("days")
+              && urlPath[validUrlPathSkiersPosition].equals("skiers")
+              && urlPath[validUrlPathResortNumberPosition]!= null
+              && isNumeric(urlPath[validUrlPathResortNumberPosition])
+              && urlPath[validUrlPathSeasonIDPosition]!= null
+              && isNumeric(urlPath[validUrlPathSeasonIDPosition])
+              && urlPath[validUrlPathDaysIDPosition]!= null
+              && isNumeric(urlPath[validUrlPathDaysIDPosition])
+              && urlPath[validUrlPathSkiersIDPosition]!= null
+              && isNumeric(urlPath[validUrlPathSkiersIDPosition])
+              && validDays.contains(urlPath[validUrlPathDaysIDPosition])
+              && urlPath[validUrlPathSeasonIDPosition].equals(seasonID)
+              && Integer.parseInt(urlPath[validUrlPathResortNumberPosition]) >= resortID_Min
+              && Integer.parseInt(urlPath[validUrlPathResortNumberPosition]) <= resortID_Max
+              && Integer.parseInt(urlPath[validUrlPathSkiersIDPosition]) >= skierID_Min
+              && Integer.parseInt(urlPath[validUrlPathSkiersIDPosition]) <= skierID_Max;
     }
     return false;
   }
@@ -247,9 +395,9 @@ public class SkierServlet extends HttpServlet {
     int liftID_Max = 40;
     int liftID_Min = 1;
     return liftRideRecord.getTime() >= time_Min
-        && liftRideRecord.getTime() <= time_Max
-        && liftRideRecord.getLiftID() >= liftID_Min
-        && liftRideRecord.getLiftID() <= liftID_Max;
+            && liftRideRecord.getTime() <= time_Max
+            && liftRideRecord.getLiftID() >= liftID_Min
+            && liftRideRecord.getLiftID() <= liftID_Max;
   }
 
 
